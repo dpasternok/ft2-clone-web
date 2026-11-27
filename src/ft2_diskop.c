@@ -90,6 +90,8 @@ static uint8_t FReq_Item;
 static bool FReq_ShowAllFiles, insPathSet, smpPathSet, patPathSet, trkPathSet, firstTimeOpeningDiskOp = true;
 #ifdef __EMSCRIPTEN__
 static bool webDiskOpPending, webLibraryMode;
+static int32_t webLibraryCapacity;
+static char webLibraryPath[PATH_MAX + 1];
 #endif
 static int32_t FReq_EntrySelected = -1, FReq_FileCount, FReq_DirPos, lastMouseY;
 static UNICHAR *FReq_CurPathU, *FReq_ModCurPathU, *FReq_InsCurPathU, *FReq_SmpCurPathU, *FReq_PatCurPathU, *FReq_TrkCurPathU;
@@ -332,6 +334,9 @@ static void freeDirRecBuffer(void)
 	}
 
 	FReq_FileCount = 0;
+#ifdef __EMSCRIPTEN__
+	webLibraryCapacity = 0;
+#endif
 }
 
 void freeDiskOp(void)
@@ -645,6 +650,14 @@ static void openDirectory(UNICHAR *strU)
 		return;
 	}
 
+#ifdef __EMSCRIPTEN__
+	if (webLibraryMode)
+	{
+		EM_ASM({ Module.navigateWebLibrary(UTF8ToString($0)); }, strU);
+		return;
+	}
+#endif
+
 	if (UNICHAR_CHDIR(strU) != 0)
 		okBox(0, "System message", "Couldn't open directory! No permission or in use?", NULL);
 	else
@@ -653,6 +666,13 @@ static void openDirectory(UNICHAR *strU)
 
 bool diskOpGoParent(void)
 {
+#ifdef __EMSCRIPTEN__
+	if (webLibraryMode)
+	{
+		EM_ASM({ Module.navigateWebLibrary(".."); });
+		return true;
+	}
+#endif
 	if (chdir("..") == 0)
 	{
 		editor.diskOpReadDir = true;
@@ -890,7 +910,7 @@ void trimEntryName(char *name, bool isDir)
 
 	int32_t j = (int32_t)strlen(name);
 	const int32_t extOffset = getExtOffset(name, j);
-	int32_t extLen = (int32_t)strlen(&name[extOffset]);
+	int32_t extLen = extOffset >= 0 ? (int32_t)strlen(&name[extOffset]) : 0;
 	j--;
 
 	if (isDir)
@@ -1837,7 +1857,26 @@ static void displayCurrPath(void)
 	fillRect(4, 145, 162, 10, PAL_DESKTOP);
 
 #ifdef __EMSCRIPTEN__
-	textOut(4, 145, PAL_FORGRND, webLibraryMode ? "Web module library" : "Browser file storage");
+	if (webLibraryMode)
+	{
+		char *path = diskOpNameToCp850(webLibraryPath, false);
+		if (path != NULL)
+		{
+			if (textWidth(path) <= 162)
+				textOut(4, 145, PAL_FORGRND, path);
+			else
+			{
+				const char *tail = path;
+				while (*tail != '\0' && textWidth(tail) > 144)
+					tail++;
+				textOut(4, 145, PAL_FORGRND, "...");
+				textOutClipX(22, 145, PAL_FORGRND, tail, 165);
+			}
+			free(path);
+		}
+	}
+	else
+		textOut(4, 145, PAL_FORGRND, "Browser file storage");
 #else
 	if (FReq_CurPathU == NULL)
 		return;
@@ -2003,34 +2042,68 @@ EMSCRIPTEN_KEEPALIVE int32_t webDiskOpBeginLibrary(void)
 	return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE int32_t webDiskOpAddLibraryEntry(const char *filename, int32_t filesize)
+EMSCRIPTEN_KEEPALIVE void webDiskOpSetLibraryPath(const char *path)
 {
-	if (!webLibraryMode || filename == NULL || filename[0] == '\0' ||
-		strchr(filename, '/') != NULL || strchr(filename, '\\') != NULL ||
-		strcmp(filename, ".") == 0 || strcmp(filename, "..") == 0)
+	snprintf(webLibraryPath, sizeof (webLibraryPath), "/%s", path);
+}
+
+EMSCRIPTEN_KEEPALIVE int32_t webDiskOpAddLibraryEntry(const char *filename, int32_t filesize, int32_t isDir)
+{
+	if (!webLibraryMode || filename == NULL || filename[0] == '\0' || FReq_FileCount == INT32_MAX)
 	{
 		return 0;
 	}
 
-	const int32_t filenameLen = (int32_t)strlen(filename);
-	const int32_t extOffset = getExtOffset((char *)filename, filenameLen);
-	if (extOffset < 0 || !moduleExtensionAccepted((char *)&filename[extOffset + 1]))
+	const bool parent = isDir && strcmp(filename, "..") == 0;
+	for (const char *ptr = filename; ; ptr++)
+	{
+		if (*ptr == '\\' || *ptr == '/')
+			return 0;
+		if ((*ptr != '\0' && (unsigned char)*ptr < 32) || (unsigned char)*ptr == 127)
+			return 0;
+
+		if (*ptr == '\0')
+			break;
+	}
+
+	if (!parent && (strcmp(filename, ".") == 0 || strcmp(filename, "..") == 0))
 		return 0;
+
+	if (!isDir)
+	{
+		const int32_t filenameLen = (int32_t)strlen(filename);
+		const int32_t extOffset = getExtOffset((char *)filename, filenameLen);
+		if (extOffset < 0 || !moduleExtensionAccepted((char *)&filename[extOffset + 1]))
+			return 0;
+	}
 
 	UNICHAR *nameU = UNICHAR_STRDUP(filename);
 	if (nameU == NULL)
 		return 0;
 
-	DirRec *newPtr = (DirRec *)realloc(FReq_Buffer, sizeof (DirRec) * (FReq_FileCount + 1));
-	if (newPtr == NULL)
+	if (FReq_FileCount == webLibraryCapacity)
 	{
-		free(nameU);
-		return 0;
+		const int32_t newCapacity = (webLibraryCapacity == 0) ? 64 :
+			(webLibraryCapacity > INT32_MAX / 2) ? INT32_MAX : webLibraryCapacity * 2;
+		if ((size_t)newCapacity > (size_t)-1 / sizeof (*FReq_Buffer))
+		{
+			free(nameU);
+			return 0;
+		}
+
+		DirRec *newPtr = (DirRec *)realloc(FReq_Buffer, sizeof (*FReq_Buffer) * (size_t)newCapacity);
+		if (newPtr == NULL)
+		{
+			free(nameU);
+			return 0;
+		}
+
+		FReq_Buffer = newPtr;
+		webLibraryCapacity = newCapacity;
 	}
 
-	FReq_Buffer = newPtr;
 	FReq_Buffer[FReq_FileCount].nameU = nameU;
-	FReq_Buffer[FReq_FileCount].isDir = false;
+	FReq_Buffer[FReq_FileCount].isDir = isDir != 0;
 	FReq_Buffer[FReq_FileCount].filesize = filesize < 0 ? -1 : filesize;
 	FReq_FileCount++;
 	return 1;
@@ -2251,7 +2324,10 @@ static void setDiskOpItem(uint8_t item)
 
 #ifdef __EMSCRIPTEN__
 	if (item != DISKOP_ITEM_MODULE)
+	{
 		webLibraryMode = false;
+		EM_ASM({ Module.webLibraryRequestId++; });
+	}
 #endif
 
 	FReq_Item = item;
@@ -2570,22 +2646,17 @@ void pbDiskOpListDown(void)
 
 void pbDiskOpParent(void)
 {
-#ifdef __EMSCRIPTEN__
-	if (webLibraryMode)
-	{
-		webLibraryMode = false;
-		editor.diskOpReadDir = true;
-		return;
-	}
-#endif
-
 	diskOpGoParent();
 }
 
 void pbDiskOpRoot(void)
 {
 #ifdef __EMSCRIPTEN__
-	webLibraryMode = false;
+	if (webLibraryMode)
+	{
+		EM_ASM({ Module.navigateWebLibrary("/"); });
+		return;
+	}
 #endif
 #ifdef _WIN32
 	openDirectory(L"\\");

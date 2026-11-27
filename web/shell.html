@@ -46,7 +46,7 @@
 <body>
 	<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
 	<div id="status">Loading Fasttracker II clone...</div>
-	<input id="file-input" type="file" accept=".xm,.mod,.s3m,.stm,.it,.xi,.wav,.aif,.aiff,.ogg,.mp3,.flac,.raw">
+	<input id="file-input" type="file" accept=".xi,.iff,.raw,.wav,.snd,.smp,.sam,.aif,.pat,.aiff,.flac,.ogg,.mp3,.brr">
 	<script>
 		var statusElement = document.getElementById("status");
 		var fileInput = document.getElementById("file-input");
@@ -67,8 +67,20 @@
 			},
 			statusTimeout: null,
 			webLibraryRequestId: 0,
+			webLibraryRoot: null,
+			webLibraryPath: [],
+			webModuleExtensions: null,
 			webModuleLoading: false,
 			onRuntimeInitialized: function () {
+				const extensions = [];
+				for (let i = 0; ; i++) {
+					const extension = this.ccall("webModuleExtension", "string", ["number"], [i]);
+					if (extension === "END_OF_LIST")
+						break;
+					extensions.push(extension);
+				}
+				this.webModuleExtensions = new Set(extensions);
+				fileInput.accept += "," + extensions.map(extension => "." + extension).join(",");
 				this.notify("Drop a file or press Ctrl+O to open it. Ctrl+D opens Disk Op.");
 				if (navigator.platform.toLowerCase().includes("mac"))
 					this.notify("Drop a file or press Cmd+O to open it. Cmd+D opens Disk Op.");
@@ -85,33 +97,96 @@
 					if (!index || !Array.isArray(index.files))
 						throw new Error("Module index has an invalid format");
 
+					const root = { directories: new Map(), files: [] };
 					for (const entry of index.files) {
+						const pathParts = entry && typeof entry.name === "string" ? entry.name.split("/") : [];
+						const filename = pathParts[pathParts.length - 1] || "";
+						const extensionOffset = filename.lastIndexOf(".");
+						const extension = filename.slice(extensionOffset + 1);
 						if (!entry || typeof entry.name !== "string" ||
-							entry.name.length === 0 || /[\/\\]/.test(entry.name) ||
-							!/\.(xm|ft|nst|stk|mod|s3m|stm|fst|digi|bem|it)$/i.test(entry.name) ||
+							pathParts.some(part => !part || part === "." || part === ".." || /[\\\u0000-\u001f\u007f]/.test(part)) ||
+							extensionOffset <= 0 || !/^[a-z0-9]+$/i.test(extension) ||
+							!this.webModuleExtensions.has(extension.toLowerCase()) ||
 							!Number.isSafeInteger(entry.size) || entry.size < 0)
 						{
 							throw new Error("Module index contains an invalid entry");
 						}
+
+						let directory = root;
+						for (const part of pathParts.slice(0, -1)) {
+							if (!directory.directories.has(part))
+								directory.directories.set(part, { directories: new Map(), files: [] });
+							directory = directory.directories.get(part);
+						}
+						directory.files.push({ name: pathParts[pathParts.length - 1], size: entry.size });
 					}
 
 					if (requestId !== this.webLibraryRequestId)
 						return;
 
-					for (const entry of index.files) {
-						if (!this.ccall("webDiskOpAddLibraryEntry", "number", ["string", "number"], [entry.name, entry.size]))
-							throw new Error("Could not add module to Disk Op. list: " + entry.name);
-					}
-
-					this.ccall("webDiskOpFinishLibrary", null, [], []);
+					this.webLibraryRoot = root;
+					if (!this.getWebLibraryDirectory())
+						this.webLibraryPath = [];
+					this.showWebLibraryDirectory();
 					if (index.files.length === 0)
 						this.notify("The web module library is empty.");
 				} catch (error) {
 					if (requestId !== this.webLibraryRequestId)
 						return;
+					this.webLibraryRoot = null;
 					console.error("Could not load the web module library:", error);
+					this.ccall("webDiskOpBeginLibrary", "number", [], []);
 					this.ccall("webDiskOpFinishLibrary", null, [], []);
-					this.notify("Could not load the web module library.");
+					this.notify("Could not load the web module library: " + (error.message || error));
+				}
+			},
+			getWebLibraryDirectory: function () {
+				let directory = this.webLibraryRoot;
+				for (const part of this.webLibraryPath) {
+					if (!directory)
+						return null;
+					directory = directory.directories.get(part);
+				}
+				return directory;
+			},
+			showWebLibraryDirectory: function () {
+				const directory = this.getWebLibraryDirectory();
+				if (!directory)
+					throw new Error("Module library directory does not exist");
+
+				this.ccall("webDiskOpBeginLibrary", "number", [], []);
+				this.ccall("webDiskOpSetLibraryPath", null, ["string"], [this.webLibraryPath.join("/")]);
+				const addEntry = (name, size, isDir) => {
+					if (!this.ccall("webDiskOpAddLibraryEntry", "number", ["string", "number", "number"], [name, size, isDir]))
+						throw new Error("Could not add entry to Disk Op. list: " + name);
+				};
+				if (this.webLibraryPath.length)
+					addEntry("..", 0, 1);
+				for (const name of [...directory.directories.keys()].sort((a, b) => a.localeCompare(b)))
+					addEntry(name, 0, 1);
+				for (const entry of directory.files.sort((a, b) => a.name.localeCompare(b.name)))
+					addEntry(entry.name, entry.size, 0);
+				this.ccall("webDiskOpFinishLibrary", null, [], []);
+			},
+			navigateWebLibrary: function (name) {
+				if (!this.webLibraryRoot)
+					return;
+				try {
+					const directory = this.getWebLibraryDirectory();
+					if (name === "/")
+						this.webLibraryPath = [];
+					else if (name === "..")
+						this.webLibraryPath.pop();
+					else if (directory && directory.directories.has(name))
+						this.webLibraryPath.push(name);
+					else
+						throw new Error("Module library directory does not exist: " + name);
+					this.showWebLibraryDirectory();
+				} catch (error) {
+					console.error("Could not open the web library directory:", error);
+					this.ccall("webDiskOpBeginLibrary", "number", [], []);
+					this.ccall("webDiskOpFinishLibrary", null, [], []);
+					this.notify("Could not open the web library directory: " + (error.message || error));
 				}
 			},
 			loadWebModule: async function (name) {
@@ -120,19 +195,26 @@
 
 				this.webModuleLoading = true;
 				let path;
+				let fileWritten = false;
 				try {
+					const pathParts = [...this.webLibraryPath, name];
 					this.notify("Loading " + name + "...");
-					const response = await fetch(new URL("mods/" + encodeURIComponent(name), document.baseURI));
+					if (pathParts.some(part => !part || part === "." || part === ".." || /[\/\\\u0000-\u001f\u007f]/.test(part)))
+						throw new Error("Invalid module path");
+
+					const encodedPath = pathParts.map(encodeURIComponent).join("/");
+					const response = await fetch(new URL("mods/" + encodedPath, document.baseURI));
 					if (!response.ok)
 						throw new Error("Module request failed: " + response.status);
 
 					const contents = new Uint8Array(await response.arrayBuffer());
-					this.FS.mkdirTree("/web-library");
-					path = "/web-library/" + name;
+					this.FS.mkdirTree("/web-library/" + pathParts.slice(0, -1).join("/"));
+					path = "/web-library/" + pathParts.join("/");
 					this.FS.writeFile(path, contents);
+					fileWritten = true;
 					const moduleLoaded = this.ccall("webLoadDroppedFile", "number", ["string"], [path]);
 					if (moduleLoaded)
-						updateDocumentTitle(name);
+						updateDocumentTitle(pathParts[pathParts.length - 1]);
 					else
 						this.notify("Could not load " + name);
 				} catch (error) {
@@ -140,7 +222,7 @@
 					this.notify("Could not open " + name);
 				} finally {
 					try {
-						if (path && this.FS.analyzePath(path).exists)
+						if (fileWritten)
 							this.FS.unlink(path);
 					} finally {
 						this.webModuleLoading = false;

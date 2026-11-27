@@ -6,7 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-SUPPORTED_EXTENSIONS = {".bem", ".digi", ".ft", ".fst", ".it", ".mod", ".nst", ".s3m", ".stm", ".stk", ".xm"}
+from module_extensions import is_supported_module
 
 
 def generate_index(mods_dir: Path, output_file: Path) -> None:
@@ -14,9 +14,9 @@ def generate_index(mods_dir: Path, output_file: Path) -> None:
 	output_file.parent.mkdir(parents=True, exist_ok=True)
 
 	mods = [
-		{"name": path.name, "size": path.stat().st_size}
-		for path in sorted(mods_dir.iterdir(), key=lambda item: item.name.casefold())
-		if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+		{"name": path.relative_to(mods_dir).as_posix(), "size": path.stat().st_size}
+		for path in sorted(mods_dir.rglob("*"), key=lambda item: item.relative_to(mods_dir).as_posix().casefold())
+		if path.is_file() and not path.is_symlink() and is_supported_module(path)
 	]
 	output_file.write_text(
 		json.dumps({"files": mods}, ensure_ascii=False, indent=2) + "\n",
@@ -30,9 +30,11 @@ def copy_library(source: Path, destination: Path) -> None:
 	with tempfile.TemporaryDirectory(prefix=".mods-copy-", dir=destination.parent) as temp:
 		staging = Path(temp) / "mods"
 		staging.mkdir()
-		for path in source.iterdir():
-			if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-				shutil.copy2(path, staging / path.name)
+		for path in source.rglob("*"):
+			if path.is_file() and not path.is_symlink() and is_supported_module(path):
+				target = staging / path.relative_to(source)
+				target.parent.mkdir(parents=True, exist_ok=True)
+				shutil.copy2(path, target)
 
 		generate_index(staging, staging / "index.json")
 		previous = Path(temp) / "previous"

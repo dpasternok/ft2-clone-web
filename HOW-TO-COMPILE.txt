@@ -46,13 +46,20 @@ Compiled Windows/macOS binaries are always available at 16-bits.org/ft2.php
  1. Install Emscripten, CMake and Ninja. On macOS with Homebrew:
     brew install emscripten cmake ninja
  2. Compile the web version:
-    Python 3 is required. Put modules in the local mods/ directory before
-    building. Supported files are copied to build-web/web/mods/ and indexed;
-    an empty or missing mods/ directory produces an empty library.
+    Python 3 is required. Put modules anywhere under the local mods/ directory
+    before building. Supported files and subdirectories are copied to
+    build-web/web/mods/ and indexed recursively; an empty or missing mods/
+    directory produces an empty library. Empty directories and symbolic links
+    are not included. An index containing names with backslashes or ASCII
+    control characters is rejected by the browser.
+    The accepted module extensions are listed in src/ft2_module_extensions.inc.
+    Extensions are case-insensitive; a matching extension does not guarantee
+    that the file contains a valid module.
     ./make-web.sh
-    To download modules from https://mod.crh.ovh/mods/ instead, run:
+    To download modules recursively from https://mod.crh.ovh/mods/ instead, run:
     MODS_SOURCE=remote ./make-web.sh
-    Remote mode requires internet access; a download failure stops the build.
+    Remote mode requires internet access and directory listings enabled in
+    source subdirectories; a download failure stops the build.
     The GitHub Pages workflow uses remote mode. Rebuild to update the library.
     Upload the complete build-web/web/ directory to publish the app and modules.
  3. Serve the files over HTTP (do not open index.html via file://):
@@ -61,11 +68,12 @@ Compiled Windows/macOS binaries are always available at 16-bits.org/ft2.php
     Press Ctrl+O or Ctrl+D (Cmd+O or Cmd+D on macOS), or drop a module/sample
     onto the page to load a local file.
     Web defaults are the "Why colors?" palette and Linear (FT2) interpolation.
-    The Disk Op. button opens the in-app browser, which directly lists public
-    modules from mods/index.json; a module is fetched only when selected. It
-    cannot browse folders on your computer. Modules saved in the virtual file
-    system are downloaded by the browser. Virtual files are temporary and are
-    lost when the page is reloaded.
+    The Disk Op. button opens the in-app browser, which displays the public
+    modules and directories from mods/index.json; a module is fetched only
+    when selected. Use ../ or Backspace to go up, and / to return to the library
+    root. Disk Op. cannot browse folders on your computer. Modules saved in the
+    virtual file system are downloaded by the browser. Virtual files are
+    temporary and are lost when the page is reloaded.
     S3M is supported only partially; its warning is shown as a temporary
     status message, and web-only dialogs continue with their default option.
 

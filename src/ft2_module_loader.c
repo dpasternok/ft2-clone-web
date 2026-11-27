@@ -57,12 +57,20 @@ enum
 // file extensions accepted by Disk Op. in module mode
 char *supportedModExtensions[] =
 {
-	"xm", "ft", "nst", "stk", "mod", "s3m", "stm", "fst",
-	"digi", "bem", "it",
-
-	// IMPORTANT: Remember comma after last entry above
+#include "ft2_module_extensions.inc"
 	"END_OF_LIST" // do NOT move, remove or edit this line!
 };
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE const char *webModuleExtension(int32_t index)
+{
+	const size_t count = sizeof (supportedModExtensions) / sizeof (supportedModExtensions[0]);
+	if (index < 0 || (size_t)index >= count)
+		return "END_OF_LIST";
+
+	return supportedModExtensions[index];
+}
+#endif
 
 // globals for module loaders
 volatile bool tmpLinearPeriodsFlag;

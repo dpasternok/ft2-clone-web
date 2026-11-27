@@ -1,6 +1,6 @@
 .DS_Store
+__pycache__/
 /build-web/
-/web/dist/
 /mods/
 release/macos/ft2-clone-macos.app/Contents/MacOS/ft2-clone-macos
 vs2026_project/.vs/*

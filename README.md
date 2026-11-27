@@ -41,13 +41,15 @@ Please don't nag me about it, and try to use the Linux packages linked to from [
 # WebAssembly build
 This repository also includes an experimental browser build using Emscripten. See the `COMPILING FOR WEBASSEMBLY` section in [HOW-TO-COMPILE.txt](HOW-TO-COMPILE.txt) for prerequisites, local serving, and publishing instructions.
 
-Put modules in the local `mods/` directory and run `./make-web.sh` to build into `build-web/web/`. The build copies supported files and generates a library index; a missing or empty `mods/` produces an empty library. Python 3 is required. The web Disk Op. lists the published library, and visitors download individual modules only when selected. The published modules are publicly accessible.
+Put modules anywhere under the local `mods/` directory and run `./make-web.sh` to build into `build-web/web/`. The build recursively copies supported files, preserves subdirectories, and generates a library index; a missing or empty `mods/` produces an empty library. Python 3 is required. The web Disk Op. lets visitors navigate the library's directories and downloads an individual module only when selected. The published modules are publicly accessible.
 
-To download the library from [mod.crh.ovh/mods/](https://mod.crh.ovh/mods/) instead, run `MODS_SOURCE=remote ./make-web.sh`. This mode needs an internet connection and stops on a failed download. Rebuild to pick up source changes; the GitHub Pages workflow uses remote mode.
+Only directories containing supported modules are shown; empty directories are omitted, and the local build skips symbolic links. Use `../` or Backspace to go up, and `/` to return to the library root. The accepted module extensions are defined in [`src/ft2_module_extensions.inc`](src/ft2_module_extensions.inc); extensions are case-insensitive, but a matching extension does not guarantee a valid module. An index containing names with backslashes or ASCII control characters is rejected by the browser.
+
+To download the library recursively from [mod.crh.ovh/mods/](https://mod.crh.ovh/mods/) instead, run `MODS_SOURCE=remote ./make-web.sh`. The server must allow directory listings for the subdirectories. This mode needs an internet connection and stops on a failed download. Rebuild to pick up source changes; the GitHub Pages workflow uses remote mode.
 
 Press Ctrl+O or Ctrl+D (Cmd+O or Cmd+D on macOS) to choose a local file; the in-app **Disk Op.** button opens the `mods/` library.
 
-The GitHub Actions workflow builds and deploys the site to GitHub Pages on pushes to `master` or when manually triggered. Configure the repository's Pages deployment source to **GitHub Actions**. The browser build has no MIDI support, and its virtual files and saved configuration do not persist after reloading the page.
+The GitHub Actions workflow builds and deploys the site to [GitHub Pages](https://dpasternok.github.io/ft2-clone-web/) on pushes to `master` or when manually triggered. Configure the repository's Pages deployment source to **GitHub Actions**. The browser build has no MIDI support, and its virtual files and saved configuration do not persist after reloading the page.
 
 ---
 
