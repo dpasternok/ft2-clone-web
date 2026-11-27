@@ -700,7 +700,7 @@ void sanitizeFilename(const char *src)
 
 void diskOpSetFilename(uint8_t type, UNICHAR *pathU)
 {
-	char *ansiPath = unicharToCp850(pathU, true);
+	char *ansiPath = diskOpNameToCp850(pathU, true);
 	if (ansiPath == NULL)
 		return;
 
