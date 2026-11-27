@@ -204,7 +204,11 @@ void updateCurrSongFilename(void) // for window title
 	if (modTmpFName == NULL)
 		return;
 
+#ifdef __EMSCRIPTEN__
+	modTmpFNameUTF8 = diskOpNameToCp850(modTmpFName, false);
+#else
 	modTmpFNameUTF8 = cp850ToUtf8(modTmpFName);
+#endif
 }
 
 // drive buttons for Windows
@@ -678,7 +682,7 @@ static char *getFilenameFromPath(char *p)
 			break;
 	}
 
-	if (i != 0)
+	if (i >= 0)
 		p += i+1; // we found a directory delimiter - skip to the last one
 
 	return p;
@@ -721,7 +725,12 @@ void diskOpSetFilename(uint8_t type, UNICHAR *pathU)
 		case DISKOP_ITEM_MODULE:
 		{
 			strcpy(modTmpFName, filename);
+#ifdef __EMSCRIPTEN__
+			free(modTmpFNameUTF8);
+			modTmpFNameUTF8 = UNICHAR_STRDUP(getFilenameFromPath(pathU));
+#else
 			updateCurrSongFilename(); // for window title
+#endif
 
 			if (editor.moduleSaveMode == MOD_SAVE_MODE_MOD)
 				changeFilenameExt(modTmpFName, ".mod", PATH_MAX);
